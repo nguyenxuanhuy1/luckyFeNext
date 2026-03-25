@@ -1,65 +1,73 @@
-import Image from "next/image";
+import type { Metadata } from "next";
+import LuckySpinClient from "./components/LuckySpinClient";
 
-export default function Home() {
+export const metadata: Metadata = {
+  title: "LuckyPick - Vòng Quay May Mắn Đỉnh Cao 3D",
+  description:
+    "Trải nghiệm vòng quay may mắn (Lucky Spin) ngẫu nhiên, đẹp mắt với đồ họa 3D siêu mượt. Công cụ bốc thăm ngẫu nhiên kết nối API, tối ưu hoàn hảo cho các sự kiện trực tiếp.",
+  keywords: [
+    "vòng quay may mắn",
+    "lucky spin",
+    "bốc thăm trúng thưởng",
+    "random picker",
+    "vòng quay 3d",
+    "sự kiện",
+    "quay số",
+  ],
+  openGraph: {
+    title: "LuckyPick - Vòng Quay May Mắn Đỉnh Cao 3D",
+    description:
+      "Trải nghiệm vòng quay may mắn ngẫu nhiên, đẹp mắt với đồ họa 3D siêu mượt. Công cụ bốc thăm ngẫu nhiên số 1.",
+    url: "https://luckypick.example.com",
+    siteName: "LuckyPick",
+    locale: "vi_VN",
+    type: "website",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "LuckyPick - Vòng Quay May Mắn Đỉnh Cao 3D",
+    description:
+      "Trải nghiệm vòng quay may mắn ngẫu nhiên với đồ họa 3D siêu mượt!",
+  },
+};
+
+export default function Page() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <main>
+      {/* Cấu trúc JSON-LD (Schema.org) để tối ưu hiển thị SEO trên Google */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "WebApplication",
+            name: "LuckyPick - Vòng Quay May Mắn 3D",
+            url: "https://luckypick.example.com",
+            description:
+              "Ứng dụng quay vòng may mắn bốc thăm trúng thưởng đồ họa 3D đẹp mắt, hỗ trợ tuỳ chỉnh tham số linh hoạt và chuẩn bị tích hợp API backend dễ dàng.",
+            applicationCategory: "UtilitiesApplication",
+            operatingSystem: "All",
+            inLanguage: "vi",
+            offers: {
+              "@type": "Offer",
+              price: "0",
+              priceCurrency: "VND",
+            },
+          }),
+        }}
+      />
+      <LuckySpinClient />
+    </main>
   );
 }
