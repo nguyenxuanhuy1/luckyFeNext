@@ -1,11 +1,31 @@
 @import "tailwindcss";
 
 :root {
-  --bg-deep: #050510;
-  --bg-card: rgba(15, 15, 40, 0.85);
-  --gold: #ffd700;
-  --gold-light: #ffe566;
-  --gold-dark: #b8960c;
+  /* LIGHT MODE (DEFAULT) */
+  --bg-deep: #f8fafc;
+  --bg-card: rgba(255, 255, 255, 0.95);
+  --text-main: #0f172a;
+  --gold: #6366f1; /* Changed to indigo */
+  --gold-light: #818cf8;
+  --gold-dark: #4338ca;
+  --purple: #7c3aed;
+  --purple-light: #8b5cf6;
+  --cyan: #06b6d4;
+  --pink: #ec4899;
+  --green: #10b981;
+  --orange: #f97316;
+  --red: #ef4444;
+  --blue: #3b82f6;
+}
+
+.dark {
+  /* DARK MODE */
+  --bg-deep: #0f111a;
+  --bg-card: rgba(15, 17, 26, 0.85);
+  --text-main: #ffffff;
+  --gold: #6366f1; /* Changed to indigo */
+  --gold-light: #818cf8;
+  --gold-dark: #3730a3;
   --purple: #7c3aed;
   --purple-light: #a78bfa;
   --cyan: #06b6d4;
@@ -27,8 +47,24 @@ body {
   height: 100%;
   font-family: "Inter", sans-serif;
   background: var(--bg-deep);
-  color: #fff;
+  color: var(--text-main);
   overflow-x: hidden;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+/* Ẩn bớt sao và hiệu ứng khói trong Light Mode để giao diện sáng sủa */
+:root .starfield,
+:root .nebula {
+  opacity: 0.05;
+  filter: invert(1);
+}
+.dark .starfield {
+  opacity: 1;
+  filter: none;
+}
+.dark .nebula {
+  opacity: 1;
+  filter: none;
 }
 
 /* Scrollbar */

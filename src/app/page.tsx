@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import LuckySpinClient from "./components/LuckySpinClient";
+import LuckySpinClient from "@/components/LuckySpinClient";
 
 export const metadata: Metadata = {
   title: "LuckyPick - Vòng Quay May Mắn Đỉnh Cao 3D",
