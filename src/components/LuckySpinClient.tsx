@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useTheme } from "next-themes";
 import { Sun, Moon } from "lucide-react";
-import { wheelService, Wheel, SpinHistoryResponse } from "@/services/api";
+import { wheelService, Wheel, SpinHistoryResponse, getAuth, authService } from "@/services/api";
 
 /* ============================
    TYPES
@@ -122,7 +122,7 @@ function SpinWheelSVG({
 
   if (count === 0) {
     return (
-      <svg viewBox={`0 0 ${size} ${size}`} className="spin-wheel">
+      <svg viewBox={`0 0 ${size} ${size}`} className="spin-wheel" style={{ pointerEvents: 'none' }}>
         <circle cx={cx} cy={cy} r={r} fill="#1a1a3e" stroke="none" />
         <text
           x={cx}
@@ -144,7 +144,7 @@ function SpinWheelSVG({
       <svg
         viewBox={`0 0 ${size} ${size}`}
         className={`spin-wheel ${isSpinning ? "is-spinning" : ""}`}
-        style={{ transform: `rotate(${rotation}deg)` }}
+        style={{ transform: `rotate(${rotation}deg)`, pointerEvents: 'none' }}
       >
         <circle cx={cx} cy={cy} r={r} fill={SEGMENT_COLORS[0]} />
         <text
@@ -189,14 +189,17 @@ function SpinWheelSVG({
       `A ${innerR} ${innerR} 0 ${largeArc} 0 ${xi1} ${yi1}`,
       "Z",
     ].join(" ");
-
     const midAngle = ((i + 0.5) * segmentAngle * Math.PI) / 180;
-    const textR = innerR + 30; // Chữ nằm dọc, cách tâm innerR + 30px
+
+    // textR: sát vòng tâm, chữ chạy ra ngoài → hiển thị được nhiều hơn khi ô rộng
+    const textR = innerR + 18;
+
     const tx = cx + textR * Math.cos(midAngle);
     const ty = cy + textR * Math.sin(midAngle);
     const textRotation = (i + 0.5) * segmentAngle;
 
-    const maxLen = count > 8 ? 14 : 20;
+    // maxLen tỉ lệ thuận với góc của ô: ô càng rộng → hiển thị càng nhiều ký tự
+    const maxLen = Math.max(4, Math.floor(segmentAngle / 4));
     const displayName =
       p.name.length > maxLen ? p.name.slice(0, maxLen - 1) + "…" : p.name;
 
@@ -229,13 +232,13 @@ function SpinWheelSVG({
     };
   });
 
-  const fontSize = count > 10 ? 16 : count > 6 ? 20 : 24;
+  const fontSize = count > 15 ? 12 : count > 10 ? 15 : count > 6 ? 20 : 24;
 
   return (
     <svg
       viewBox={`0 0 ${size} ${size}`}
       className={`spin-wheel ${isSpinning ? "is-spinning" : ""}`}
-      style={{ transform: `rotate(${rotation}deg)` }}
+      style={{ transform: `rotate(${rotation}deg)`, pointerEvents: 'none' }}
     >
       <defs>
         {segments.map((seg) => (
@@ -257,8 +260,7 @@ function SpinWheelSVG({
           <path
             d={seg.path}
             fill={`url(#seg-grad-${seg.i})`}
-            stroke="#fbbf24"
-            strokeWidth="2.5"
+            stroke="none"
           />
           <path
             d={seg.path}
@@ -327,6 +329,289 @@ function SpinWheelSVG({
 }
 
 /* ============================
+   SLOT MACHINE SPINNER (>15 participants)
+   ============================ */
+function SlotMachineSpinner({
+  participants,
+  isSpinning,
+  targetWinner,
+  spinDuration,
+  onSpinClick,
+  disabled,
+  isFetchingResult,
+}: {
+  participants: Participant[];
+  isSpinning: boolean;
+  targetWinner: Participant | null;
+  spinDuration: number;
+  onSpinClick: () => void;
+  disabled: boolean;
+  isFetchingResult: boolean;
+}) {
+  const ITEM_H = 72;
+  const VISIBLE = 5;
+  const CENTER_IDX = Math.floor(VISIBLE / 2);
+
+  const [offset, setOffset] = useState(0);
+  const [items, setItems] = useState<Participant[]>([]);
+  const rafRef = useRef<number | null>(null);
+
+  const getColor = (p: Participant) => {
+    const idx = participants.findIndex(x => x.id === p.id);
+    return idx >= 0 ? SEGMENT_COLORS[idx % SEGMENT_COLORS.length] : '#6366f1';
+  };
+
+  useEffect(() => {
+    if (!isSpinning || !targetWinner) return;
+
+    const extraCount = Math.max(35, Math.round(spinDuration * 7));
+    const list: Participant[] = [];
+    for (let i = 0; i < extraCount; i++) {
+      list.push(participants[i % participants.length]);
+    }
+    list.push(targetWinner);
+    for (let i = 1; i <= CENTER_IDX + 1; i++) {
+      list.push(participants[(extraCount + i) % participants.length]);
+    }
+
+    setItems(list);
+    setOffset(0);
+
+    const finalOffset = -((extraCount - CENTER_IDX) * ITEM_H);
+    const startTime = performance.now();
+    const durationMs = spinDuration * 1000;
+
+    function easeOut(t: number) { return 1 - Math.pow(1 - t, 5); }
+
+    function animate(now: number) {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / durationMs, 1);
+      setOffset(finalOffset * easeOut(progress));
+      if (progress < 1) {
+        rafRef.current = requestAnimationFrame(animate);
+      }
+    }
+
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(animate);
+
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [isSpinning, targetWinner, spinDuration, participants, CENTER_IDX]);
+
+  const displayItems = items.length > 0 ? items : [...participants, ...participants].slice(0, VISIBLE + 2);
+  const frameH = ITEM_H * VISIBLE;
+
+  return (
+    <div className="flex flex-col items-center w-full max-w-[500px]">
+      {/* Machine outer frame */}
+      <div
+        className="relative w-full rounded-[28px] overflow-hidden"
+        style={{
+          background: 'linear-gradient(160deg, #0d0a20 0%, #130f2e 100%)',
+          border: '2px solid rgba(139,92,246,0.4)',
+          boxShadow: '0 0 60px rgba(99,102,241,0.2), 0 30px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05)',
+        }}
+      >
+        {/* Top status bar */}
+        <div className="flex items-center justify-between px-6 py-3.5" style={{ borderBottom: '1px solid rgba(139,92,246,0.2)', background: 'rgba(0,0,0,0.2)' }}>
+          <div className="flex items-center gap-2.5">
+            <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: '#6366f1', boxShadow: '0 0 8px #6366f1' }} />
+            <span className="text-[11px] font-[Orbitron] font-bold text-indigo-400/70 uppercase tracking-widest">DRUM SPIN</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-[Orbitron] font-bold text-indigo-400/50 uppercase tracking-widest">{participants.length} PLAYERS</span>
+          </div>
+        </div>
+
+        {/* Drum viewport */}
+        <div className="relative mx-5 my-4 rounded-2xl overflow-hidden" style={{ height: frameH, background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(139,92,246,0.15)' }}>
+          {/* Gradient fades */}
+          <div className="absolute inset-x-0 top-0 z-10 pointer-events-none" style={{ height: ITEM_H * 2, background: 'linear-gradient(to bottom, rgba(13,10,32,0.97) 0%, transparent 100%)' }} />
+          <div className="absolute inset-x-0 bottom-0 z-10 pointer-events-none" style={{ height: ITEM_H * 2, background: 'linear-gradient(to top, rgba(13,10,32,0.97) 0%, transparent 100%)' }} />
+
+          {/* Center highlight band */}
+          <div className="absolute inset-x-0 z-10 pointer-events-none" style={{
+            top: CENTER_IDX * ITEM_H,
+            height: ITEM_H,
+            background: 'rgba(99,102,241,0.1)',
+            borderTop: '2px solid rgba(139,92,246,0.55)',
+            borderBottom: '2px solid rgba(139,92,246,0.55)',
+            boxShadow: 'inset 0 0 30px rgba(99,102,241,0.1)',
+          }} />
+          {/* Left arrow tick */}
+          <div className="absolute left-0 z-20 pointer-events-none" style={{ top: CENTER_IDX * ITEM_H + ITEM_H / 2 - 10, width: 0, height: 0, borderTop: '10px solid transparent', borderBottom: '10px solid transparent', borderLeft: '12px solid rgba(139,92,246,0.7)' }} />
+          {/* Right arrow tick */}
+          <div className="absolute right-0 z-20 pointer-events-none" style={{ top: CENTER_IDX * ITEM_H + ITEM_H / 2 - 10, width: 0, height: 0, borderTop: '10px solid transparent', borderBottom: '10px solid transparent', borderRight: '12px solid rgba(139,92,246,0.7)' }} />
+
+          {/* Scrolling names */}
+          <div style={{ transform: `translateY(${offset}px)`, willChange: 'transform' }}>
+            {displayItems.map((p, i) => {
+              const color = getColor(p);
+              return (
+                <div key={i} className="flex items-center justify-center gap-4 px-10" style={{ height: ITEM_H }}>
+                  <div className="w-3.5 h-3.5 rounded-full shrink-0" style={{ background: color, boxShadow: `0 0 10px ${color}90` }} />
+                  <span className="font-black text-[22px] tracking-wide text-white/90 truncate max-w-[340px]" style={{ textShadow: '0 2px 10px rgba(0,0,0,0.9)', fontFamily: 'Inter, sans-serif' }}>
+                    {p.name}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Bottom: spin button */}
+        <div className="px-5 pb-5">
+          <button
+            className="relative w-full overflow-hidden flex items-center justify-center gap-3 font-[Orbitron] font-black text-white rounded-2xl transition-all duration-200 hover:brightness-110 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{
+              height: '56px',
+              background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
+              boxShadow: '0 6px 25px rgba(99,102,241,0.45)',
+              fontSize: '17px',
+              letterSpacing: '0.18em',
+            }}
+            onClick={onSpinClick}
+            disabled={disabled}
+          >
+            <div className="absolute inset-0 bg-[linear-gradient(105deg,transparent_30%,rgba(255,255,255,0.12)_50%,transparent_70%)] translate-x-[-100%] hover:translate-x-[100%] transition-transform duration-700 pointer-events-none" />
+            {isFetchingResult ? (
+              <span className="animate-pulse text-[14px]">⏳ KẾT NỐI...</span>
+            ) : isSpinning ? (
+              <span className="animate-pulse">ĐANG QUAY...</span>
+            ) : (
+              <span>🎰 QUAY NGAY</span>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================
+   ADMIN LOGIN MODAL (inline)
+   ============================ */
+function AdminLoginModal({
+  onSuccess,
+  onClose,
+}: {
+  onSuccess: (role: "ADMIN" | "USER") => void;
+  onClose: () => void;
+}) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPass, setShowPass] = useState(false);
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState("");
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const user = await authService.login(username, password);
+      onSuccess(user.role);
+    } catch {
+      setError("Sai tài khoản hoặc mật khẩu.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+      style={{ background: 'rgba(4,4,16,0.8)', backdropFilter: 'blur(16px)' }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm rounded-3xl overflow-hidden animate-[card-pop_0.25s_ease-out]"
+        style={{
+          background: 'linear-gradient(160deg, #0f0c29 0%, #141130 100%)',
+          border: '1px solid rgba(139,92,246,0.35)',
+          boxShadow: '0 0 0 1px rgba(139,92,246,0.1), 0 40px 80px rgba(0,0,0,0.7)',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Gradient top bar */}
+        <div className="h-1 w-full" style={{ background: 'linear-gradient(90deg,#6366f1,#a855f7,#ec4899)' }} />
+
+        <div className="px-7 py-6">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg"
+                style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(139,92,246,0.4)' }}>
+                🔐
+              </div>
+              <div>
+                <h2 className="text-white font-black text-lg tracking-wide">Admin Login</h2>
+                <p className="text-indigo-300/50 text-xs">Chỉ dành cho quản trị viên</p>
+              </div>
+            </div>
+            <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-indigo-300/60 hover:text-white transition-colors text-lg"
+              style={{ background: 'rgba(139,92,246,0.15)' }}>✕</button>
+          </div>
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+            {/* Username */}
+            <div className="flex items-center gap-3 rounded-xl px-4 py-3"
+              style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(139,92,246,0.2)' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(139,92,246,0.7)" strokeWidth="2" strokeLinecap="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+              </svg>
+              <input
+                type="text" placeholder="Tên đăng nhập"
+                value={username} onChange={(e) => setUsername(e.target.value)}
+                required autoComplete="username"
+                className="flex-1 bg-transparent border-none text-white placeholder-indigo-400/40 outline-none text-[14px] font-medium"
+              />
+            </div>
+
+            {/* Password */}
+            <div className="flex items-center gap-3 rounded-xl px-4 py-3"
+              style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(139,92,246,0.2)' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(139,92,246,0.7)" strokeWidth="2" strokeLinecap="round">
+                <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+              <input
+                type={showPass ? "text" : "password"} placeholder="Mật khẩu"
+                value={password} onChange={(e) => setPassword(e.target.value)}
+                required autoComplete="current-password"
+                className="flex-1 bg-transparent border-none text-white placeholder-indigo-400/40 outline-none text-[14px] font-medium"
+              />
+              <button type="button" onClick={() => setShowPass(v => !v)} className="text-indigo-400/40 hover:text-indigo-300 transition-colors">
+                {showPass
+                  ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                  : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                }
+              </button>
+            </div>
+
+            {/* Error */}
+            {error && (
+              <div className="text-[12px] text-red-400 px-2 font-medium">{error}</div>
+            )}
+
+            {/* Submit */}
+            <button type="submit" disabled={loading}
+              className="mt-1 py-3 rounded-xl font-black text-[14px] tracking-widest text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-40"
+              style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 4px 20px rgba(99,102,241,0.4)' }}
+            >
+              {loading
+                ? <span className="animate-pulse">Đang đăng nhập...</span>
+                : "ĐĂNG NHẬP"
+              }
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================
    MAIN COMPONENT
    ============================ */
 export default function LuckySpinClient() {
@@ -340,13 +625,16 @@ export default function LuckySpinClient() {
   const [isSpinning, setIsSpinning] = useState(false);
   const [isFetchingResult, setIsFetchingResult] = useState(false);
   const [winner, setWinner] = useState<Participant | null>(null);
+  const [pendingWinner, setPendingWinner] = useState<Participant | null>(null);
   const [showResult, setShowResult] = useState(false);
-  const [showConfetti, setShowConfetti] = useState(false);
+
   const [sessionId, setSessionId] = useState(() => generateSessionId());
   const [history, setHistory] = useState<SpinHistoryResponse[]>([]);
   const [spinDuration, setSpinDuration] = useState<number>(5);
+  const [userRole, setUserRole] = useState<"ADMIN" | "USER" | null>(null);
 
   const [isManageModalOpen, setIsManageModalOpen] = useState(false);
+  const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
 
   // Theme support
   const { theme, setTheme } = useTheme();
@@ -354,6 +642,9 @@ export default function LuckySpinClient() {
 
   useEffect(() => {
     setMounted(true);
+    // Đọc role nếu đã đăng nhập sẵn (không bắt buộc)
+    const auth = getAuth();
+    if (auth) setUserRole(auth.role);
   }, []);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -362,31 +653,11 @@ export default function LuckySpinClient() {
   const totalRotationRef = useRef<number>(0);
   const currentRotationRef = useRef<number>(0);
 
-  const initWheel = useCallback(async () => {
-    try {
-      setIsInitializing(true);
-      let wheels = await wheelService.getWheels();
-      let activeWheel: Wheel;
-      if (wheels.length === 0) {
-        activeWheel = await wheelService.createWheel("Vòng quay may mắn", DEFAULT_PARTICIPANTS.map(p => p.name));
-      } else {
-        activeWheel = await wheelService.getWheelDetail(wheels[0].id);
-      }
-      setWheelId(activeWheel.id);
-      setParticipants(activeWheel.items.map(name => ({ id: generateUid(), name })));
-      if (activeWheel.preset) {
-        setPresetResult(activeWheel.preset);
-      } else {
-        setPresetResult("");
-      }
-      
-      const hist = await wheelService.getWheelHistory(activeWheel.id);
-      setHistory(hist.reverse());
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setIsInitializing(false);
-    }
+  const initWheel = useCallback(() => {
+    // Không call API khi load trang — chỉ dùng danh sách mặc định
+    // API chỉ được gọi khi user xác nhận danh sách hoặc quay
+    setParticipants(DEFAULT_PARTICIPANTS);
+    setIsInitializing(false);
   }, []);
 
   useEffect(() => {
@@ -421,16 +692,27 @@ export default function LuckySpinClient() {
 
   /* LOGIC QUAY */
   const executeSpin = useCallback(async () => {
-    if (isSpinning || participants.length < 2 || !wheelId) return;
+    if (isSpinning || participants.length < 2) return;
 
     setIsSpinning(true);
     setIsFetchingResult(true);
     setShowResult(false);
     setWinner(null);
-    setShowConfetti(false);
 
     try {
-      const resp = await wheelService.spinWheel(wheelId);
+      // Nếu chưa có wheelId → tạo mới trên BE lần đầu quay
+      let activeWheelId = wheelId;
+      if (!activeWheelId) {
+        const newWheel = await wheelService.createWheel(
+          "Vòng quay may mắn",
+          participants.map(p => p.name)
+        );
+        activeWheelId = newWheel.id;
+        setWheelId(newWheel.id);
+        setSessionId(String(newWheel.id).slice(0, 8).toUpperCase());
+      }
+
+      const resp = await wheelService.spinWheel(activeWheelId);
       setIsFetchingResult(false);
       setPresetResult(""); // Clear local preset state since backend clears it after spinning
 
@@ -441,6 +723,7 @@ export default function LuckySpinClient() {
         return;
       }
       const apiResult = { winner: participants[winnerIndex], winnerIndex };
+      setPendingWinner(apiResult.winner);
 
       const count = participants.length;
       const segmentAngle = 360 / count;
@@ -479,8 +762,9 @@ export default function LuckySpinClient() {
         currentRotationRef.current = absoluteRotation % 360;
         setIsSpinning(false);
         setWinner(apiResult.winner);
+        setPendingWinner(null);
         setShowResult(true);
-        setShowConfetti(true);
+
 
         const now2 = new Date();
         setHistory((prev) => [
@@ -494,7 +778,7 @@ export default function LuckySpinClient() {
         ]);
 
         setSessionId(generateSessionId());
-        setTimeout(() => setShowConfetti(false), 4000);
+
       }
     }
 
@@ -564,6 +848,29 @@ export default function LuckySpinClient() {
               <span className="session-label hidden sm:inline text-[10px] sm:text-xs text-slate-500 dark:text-slate-300 mr-2 uppercase font-black tracking-widest">Session</span>
               <span className="session-id text-xs sm:text-sm font-mono font-bold text-indigo-700 dark:text-indigo-400 block w-[65px] sm:w-[80px] overflow-hidden text-ellipsis whitespace-nowrap">{sessionId}</span>
             </div>
+
+            {/* Admin area: nếu đã đăng nhập thì hiện username + logout, chưa thì hiện nút Admin nhỏ */}
+            {userRole ? (
+              <button
+                onClick={() => { authService.logout(); setUserRole(null); }}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold shrink-0 text-indigo-600 dark:text-indigo-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-all border border-indigo-200 dark:border-indigo-700/50"
+                title="Đăng xuất admin"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="hidden sm:inline font-bold">{getAuth()?.username}</span>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              </button>
+            ) : (
+              <button
+                onClick={() => window.location.href = "/login"}
+                className="flex items-center justify-center w-9 h-9 rounded-full shrink-0 text-slate-400 dark:text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 transition-all border border-slate-200 dark:border-slate-700/50"
+                title="Đăng nhập Admin"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+                </svg>
+              </button>
+            )}
           </div>
         </header>
 
@@ -572,93 +879,229 @@ export default function LuckySpinClient() {
           
           {/* CỘT TRÁI: NÚT QUẢN LÝ NGƯỜI DÙNG & LỊCH SỬ KẾT QUẢ */}
           <div className="flex flex-col w-full lg:w-[420px] shrink-0 gap-8 order-2 lg:order-1 z-10">
-            {/* NÚT QUẢN LÝ NGƯỜI THAM GIA CAO CẤP */}
+            {/* NÚT QUẢN LÝ NGƯỜI THAM GIA */}
             <button
               onClick={() => setIsManageModalOpen(true)}
-              className="w-full relative overflow-hidden flex items-center justify-between p-4 px-6 md:p-5 md:px-7 bg-white dark:bg-[#0f111a] border border-slate-200 dark:border-indigo-500/30 rounded-[24px] shadow-xl shadow-slate-200/50 dark:shadow-[0_0_30px_rgba(99,102,241,0.15)] transition-all duration-300 group hover:shadow-indigo-500/20 dark:hover:shadow-[0_0_40px_rgba(99,102,241,0.3)] hover:-translate-y-1"
+              className="w-full relative overflow-hidden flex items-center justify-between transition-all duration-300 group"
+              style={{
+                padding: '20px 24px',
+                borderRadius: '20px',
+                background: 'linear-gradient(135deg, rgba(15,12,40,0.95) 0%, rgba(20,16,50,0.95) 100%)',
+                border: '1px solid rgba(139,92,246,0.35)',
+                boxShadow: '0 0 0 1px rgba(139,92,246,0.1), 0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06)',
+              }}
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(167,139,250,0.6)';
+                (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 0 0 1px rgba(139,92,246,0.2), 0 12px 40px rgba(99,102,241,0.2), inset 0 1px 0 rgba(255,255,255,0.08)';
+                (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-2px)';
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(139,92,246,0.35)';
+                (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 0 0 1px rgba(139,92,246,0.1), 0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06)';
+                (e.currentTarget as HTMLButtonElement).style.transform = 'none';
+              }}
             >
-              <div className="absolute inset-0 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-              <div className="flex items-center gap-4 relative z-10">
-                <div className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-inner shadow-white/20">
-                  <span className="text-2xl md:text-3xl text-white drop-shadow-md">👥</span>
+              {/* Gradient top line */}
+              <div className="absolute top-0 left-0 right-0 h-px"
+                style={{ background: 'linear-gradient(90deg, transparent, rgba(167,139,250,0.6), transparent)' }} />
+              {/* Shimmer hover */}
+              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
+                style={{ background: 'radial-gradient(ellipse at 30% 50%, rgba(99,102,241,0.08) 0%, transparent 70%)' }} />
+
+              {/* Left: icon + text */}
+              <div className="relative z-10 flex items-center gap-4">
+                {/* Icon box */}
+                <div className="w-13 h-13 flex-shrink-0 flex items-center justify-center rounded-2xl"
+                  style={{
+                    width: '52px', height: '52px',
+                    background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
+                    boxShadow: '0 4px 16px rgba(99,102,241,0.5), inset 0 1px 0 rgba(255,255,255,0.2)',
+                  }}>
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                    <circle cx="9" cy="7" r="4"/>
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                  </svg>
                 </div>
-                <div className="flex flex-col items-start text-left">
-                  <span className="font-extrabold text-[#1e1b4b] dark:text-white uppercase tracking-widest text-[14px] md:text-[16px]">
+                {/* Text */}
+                <div className="flex flex-col items-start">
+                  <span className="font-black text-white text-base tracking-wide">
                     Quản lý người chơi
                   </span>
-                  <span className="text-[11px] md:text-xs text-slate-500 dark:text-indigo-300 font-medium tracking-wide mt-0.5">
-                    Thêm, sửa, xoá danh sách
+                  <span className="text-xs mt-0.5 font-medium" style={{ color: 'rgba(167,139,250,0.7)' }}>
+                    Thêm · Sửa · Xoá danh sách
                   </span>
                 </div>
               </div>
-              <div className="relative z-10 flex flex-col items-center justify-center bg-slate-100 dark:bg-[#150e28] border border-slate-200 dark:border-indigo-500/30 w-12 h-12 md:w-14 md:h-14 rounded-full shadow-sm group-hover:scale-110 transition-transform duration-300">
-                <span className="text-indigo-600 dark:text-indigo-400 text-base md:text-xl font-black">{participants.length}</span>
+
+              {/* Right: số người + arrow */}
+              <div className="relative z-10 flex items-center gap-3">
+                <div className="flex flex-col items-center px-4 py-2 rounded-xl"
+                  style={{
+                    background: 'rgba(99,102,241,0.15)',
+                    border: '1px solid rgba(139,92,246,0.25)',
+                  }}>
+                  <span className="font-black text-white text-2xl leading-none">{participants.length}</span>
+                  <span className="text-[10px] font-semibold mt-0.5" style={{ color: 'rgba(167,139,250,0.7)' }}>người</span>
+                </div>
+                <svg className="w-5 h-5 group-hover:translate-x-1 transition-transform" style={{ color: 'rgba(167,139,250,0.5)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
               </div>
             </button>
 
-            {/* LỊCH SỬ KẾT QUẢ - THIÊN THƯ (DIVINE SCROLL) */}
-            <section 
-              className="history-section flex-1 h-full min-h-[450px] w-full bg-[#1e0a11]/90 backdrop-blur-2xl rounded-2xl p-6 lg:p-8 flex flex-col shadow-2xl shadow-black/50 relative xl:max-w-md overflow-hidden"
+
+            {/* LỊCH SỬ — TẤM BIA ĐÁ */}
+            <section
+              className="history-section flex-1 h-full min-h-[450px] w-full flex flex-col relative xl:max-w-md"
               style={{
-                borderTop: "8px solid #d97706",
-                borderBottom: "8px solid #d97706",
-                borderLeft: "2px solid #92400e",
-                borderRight: "2px solid #92400e",
-                backgroundImage: "radial-gradient(ellipse at center, rgba(217,119,6,0.08) 0%, transparent 80%)"
+                /* Màu sa thạch — lớp mặt đá */
+                background: "linear-gradient(160deg, #9e8e7e 0%, #8a7a6a 25%, #7e6e5e 50%, #8c7c6c 75%, #957e6e 100%)",
+                /* Cạnh đá 3D — dày như tấm đá thật */
+                boxShadow: `
+                  inset 0 1px 0 rgba(255,255,255,0.25),
+                  inset 0 -1px 0 rgba(0,0,0,0.4),
+                  inset 1px 0 0 rgba(255,255,255,0.12),
+                  inset -1px 0 0 rgba(0,0,0,0.25),
+                  6px 6px 0 #5a4a3a,
+                  7px 7px 0 #4a3a2a,
+                  8px 8px 0 #3a2a1a,
+                  0 16px 40px rgba(0,0,0,0.6)
+                `,
+                border: "2px solid #6a5a4a",
+                borderRadius: "4px",
               }}
               aria-label="Lịch sử kết quả quay thưởng"
             >
-              {/* Decorative corners */}
-              <div className="absolute top-0 left-0 w-16 h-16 border-t-2 border-l-2 border-[#d97706] opacity-50 m-3" />
-              <div className="absolute top-0 right-0 w-16 h-16 border-t-2 border-r-2 border-[#d97706] opacity-50 m-3" />
-              <div className="absolute bottom-0 left-0 w-16 h-16 border-b-2 border-l-2 border-[#d97706] opacity-50 m-3" />
-              <div className="absolute bottom-0 right-0 w-16 h-16 border-b-2 border-r-2 border-[#d97706] opacity-50 m-3" />
+              {/* Vân đá — texture hạt đá */}
+              <div className="absolute inset-0 pointer-events-none rounded"
+                style={{
+                  backgroundImage: `
+                    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.15'/%3E%3C/svg%3E")
+                  `,
+                  mixBlendMode: "multiply",
+                  opacity: 0.6,
+                }}
+              />
+              {/* Vết nứt/vân đá chéo */}
+              <div className="absolute inset-0 pointer-events-none rounded"
+                style={{
+                  backgroundImage: "repeating-linear-gradient(73deg, transparent, transparent 8px, rgba(0,0,0,0.03) 8px, rgba(0,0,0,0.03) 9px)",
+                  opacity: 0.8,
+                }}
+              />
+              {/* Highlight mặt đá (ánh sáng từ trên) */}
+              <div className="absolute inset-x-0 top-0 h-[40%] pointer-events-none rounded-t"
+                style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.1) 0%, transparent 100%)" }} />
 
-              <div className="section-header border-b-2 border-[#d97706]/40 pb-5 flex items-center justify-between relative z-10">
-                <div className="text-[#fde68a] flex items-center gap-3 text-xl lg:text-2xl font-[Orbitron] font-black uppercase tracking-widest drop-shadow-md">
-                  <span className="text-[28px] drop-shadow-[0_0_10px_rgba(253,230,138,0.8)]">📜</span>
-                  THIÊN THƯ
+              <div className="relative z-10 p-6 lg:p-8 flex flex-col h-full">
+
+                {/* TIÊU ĐỀ khắc chìm vào đá */}
+                <div className="pb-5 mb-3 flex items-center justify-between"
+                  style={{
+                    borderBottom: "2px solid #6a5a48",
+                    boxShadow: "0 1px 0 rgba(255,255,255,0.18)",
+                  }}>
+                  <h2
+                    className="text-2xl lg:text-3xl font-black tracking-[0.25em] uppercase select-none"
+                    style={{
+                      color: "#f0ddb8",
+                      textShadow:
+                        "0 1px 3px rgba(0,0,0,0.8), 1px 1px 0 rgba(0,0,0,0.5), -1px -1px 0 rgba(255,220,140,0.1)",
+                      fontFamily: "'Georgia', 'Times New Roman', serif",
+                      letterSpacing: "0.3em",
+                    }}>
+                    ✦ LỊCH SỬ ✦
+                  </h2>
+                  {history.length > 0 && (
+                    <span
+                      className="text-xs font-bold px-3 py-1 tracking-widest rounded-sm"
+                      style={{
+                        color: "#e8c87a",
+                        background: "rgba(0,0,0,0.25)",
+                        textShadow: "0 1px 2px rgba(0,0,0,0.6)",
+                        boxShadow: "inset 0 1px 2px rgba(0,0,0,0.3), inset 0 -1px 0 rgba(255,255,255,0.1)",
+                        border: "1px solid rgba(0,0,0,0.3)",
+                      }}>
+                      {history.length} LƯỢT
+                    </span>
+                  )}
                 </div>
-                {history.length > 0 && (
-                  <span className="text-xs font-bold bg-[#d97706] text-[#fffbeb] px-3 py-1.5 rounded-md tracking-wider border border-[#fcd34d]/50 shadow-[0_0_10px_rgba(217,119,6,0.5)]">
-                    {history.length} Lượt
-                  </span>
-                )}
-              </div>
 
-              <div className="history-list flex-1 overflow-y-auto overflow-x-hidden pr-2 mt-6 space-y-4 relative z-10" style={{ maxHeight: "calc(100vh - 350px)", minHeight: "350px", overflowX: "hidden" }}>
-                {history.length === 0 ? (
-                  <div className="no-history text-[#fcd34d]/50 h-full flex flex-col items-center justify-center italic text-base gap-4 mt-6">
-                    <span className="text-5xl opacity-80 drop-shadow-[0_0_15px_rgba(253,230,138,0.4)]">🪶</span>
-                    <p className="tracking-widest uppercase font-semibold text-[#fde68a] drop-shadow-md">Chưa có dữ liệu quay!</p>
-                  </div>
-                ) : (
-                  history.map((entry, i) => {
-                    const idx = participants.findIndex(p => p.name === entry.result);
-                    const color = idx !== -1 ? SEGMENT_COLORS[idx % SEGMENT_COLORS.length] : "#fcd34d";
-                    return (
-                    <div 
-                      className="history-item flex items-center gap-4 md:gap-5 bg-[#3a1614]/80 p-4 px-5 rounded-xl border border-[#d97706]/30 hover:border-[#fcd34d]/60 transition-all hover:shadow-[0_4px_15px_rgba(0,0,0,0.5)] hover:bg-[#451a03]" 
-                      key={entry.id}
-                    >
-                      <span className="history-rank text-sm sm:text-base min-w-[2.5rem] h-10 lg:h-12 shrink-0 flex items-center justify-center bg-gradient-to-b from-[#fef08a] to-[#d97706] text-[#451a03] rounded-md font-black shadow-inner border border-[#fffbeb]">
-                        #{history.length - i}
-                      </span>
-                      <span
-                        className="w-4 h-4 rounded-full flex-shrink-0 shadow-[0_0_10px_currentColor] border border-black/30"
-                        style={{ background: color, color: color }}
-                      />
-                      <span className="history-name truncate flex-1 font-black text-[16px] lg:text-[19px] text-[#fef08a] uppercase tracking-widest font-serif drop-shadow-sm">
-                        {entry.result}
-                      </span>
-                      <span className="history-time shrink-0 text-[13px] text-[#fde68a]/90 font-mono bg-[#2a0f08]/80 px-3 py-1.5 rounded border border-[#92400e]/50 font-bold">
-                        {entry.spinTime}
-                      </span>
+                {/* Danh sách lịch sử — mỗi dòng như hàng chữ khắc */}
+                <div className="history-list flex-1 overflow-y-auto pr-1 mt-2 space-y-1"
+                  style={{ maxHeight: "calc(100vh - 350px)", minHeight: "350px" }}>
+                  {history.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center gap-4">
+                      <div className="text-5xl opacity-25 select-none">⬛</div>
+                      <p
+                        className="uppercase tracking-[0.3em] text-sm font-bold select-none"
+                        style={{
+                          color: "#d4b896",
+                          textShadow: "0 1px 2px rgba(0,0,0,0.7), 1px 1px 0 rgba(0,0,0,0.4)",
+                          fontFamily: "'Georgia', serif",
+                        }}>
+                        — CHƯA CÓ DỮ LIỆU —
+                      </p>
                     </div>
-                  )})
-                )}
+                  ) : (
+                    history.map((entry, i) => {
+                      const idx = participants.findIndex(p => p.name === entry.result);
+                      const color = idx !== -1 ? SEGMENT_COLORS[idx % SEGMENT_COLORS.length] : "#8a7a6a";
+                      return (
+                        <div
+                          key={entry.id}
+                          className="history-item flex items-center gap-3 px-3 py-2.5"
+                          style={{
+                            /* Mỗi dòng như rãnh khắc phẳng */
+                            borderBottom: "1px solid rgba(0,0,0,0.15)",
+                            boxShadow: "0 1px 0 rgba(255,255,255,0.18)",
+                          }}>
+                          {/* Số thứ tự — chữ khắc */}
+                          <span
+                            className="text-xs shrink-0 w-7 text-center font-bold select-none"
+                            style={{
+                              color: "#c8a878",
+                              textShadow: "0 1px 2px rgba(0,0,0,0.7), 1px 1px 0 rgba(0,0,0,0.4)",
+                              fontFamily: "'Georgia', serif",
+                            }}>
+                            {history.length - i}
+                          </span>
+                          {/* Dấu màu */}
+                          <span
+                            className="w-2.5 h-2.5 rounded-full shrink-0"
+                            style={{
+                              background: color,
+                              boxShadow: `0 1px 2px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.3)`,
+                            }} />
+                          {/* Tên — chữ khắc lõm */}
+                          <span
+                            className="flex-1 truncate text-sm font-bold uppercase tracking-widest select-none"
+                            style={{
+                              color: "#f0ddb8",
+                              textShadow: "0 1px 3px rgba(0,0,0,0.8), 1px 1px 0 rgba(0,0,0,0.5), -1px -1px 0 rgba(255,200,100,0.1)",
+                              fontFamily: "'Georgia', 'Times New Roman', serif",
+                            }}>
+                            {entry.result}
+                          </span>
+                          {/* Thời gian */}
+                          <span
+                            className="shrink-0 text-[10px] font-mono select-none"
+                            style={{
+                              color: "#b89a6a",
+                              textShadow: "0 1px 2px rgba(0,0,0,0.6)",
+                            }}>
+                            {entry.spinTime}
+                          </span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
               </div>
             </section>
+
           </div>
 
           {/* CỘT PHẢI: VÒNG QUAY */}
@@ -668,197 +1111,256 @@ export default function LuckySpinClient() {
               className="wheel-section relative -mt-4"
               aria-label="Khu vực vòng quay bốc thăm"
             >
-              <div className="wheel-outer-wrapper">
-                {/* Đã xóa wheel-glow-ring */}
-                <div className="wheel-container">
-                  {/* Center Pointer - Bắn từ tâm ra */}
-                  {/* Center Pointer - Mũi tên liền mạch */}
-                  <div 
-                    className="absolute top-1/2 left-1/2 z-[15] pointer-events-none drop-shadow-[5px_0_15px_rgba(0,0,0,0.3)] dark:drop-shadow-[5px_0_15px_rgba(0,0,0,0.6)]" 
-                    style={{ transform: 'translate(45px, -50%)' }}
-                  >
-                    <svg width="65" height="34" viewBox="0 0 100 50">
-                      <defs>
-                        <linearGradient id="pointerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                          <stop offset="0%" stopColor="#e0e7ff" />
-                          <stop offset="60%" stopColor="#6366f1" />
-                          <stop offset="100%" stopColor="#312e81" />
-                        </linearGradient>
-                      </defs>
-                      <path 
-                        d="M0,0 L100,25 L0,50 Q12,25 0,0 Z" 
-                        fill="url(#pointerGrad)" 
-                        stroke="#818cf8" 
-                        strokeWidth="1.5"
-                      />
-                    </svg>
-                  </div>
-
-                  {/* Đã xóa hiệu ứng hover lệch trục 3D ở phần CSS */}
-                  <div className={`wheel-3d ${isSpinning ? "spinning" : ""}`}>
-                    <div className="wheel-rim" />
-                    {[0, 45, 90, 135, 180, 225, 270, 315].map((angle) => {
-                      const rad = (angle * Math.PI) / 180;
-                      const cx = 50 + 47.5 * Math.cos(rad);
-                      const cy = 50 + 47.5 * Math.sin(rad);
-                      return (
-                        <div
-                          key={angle}
-                          className="wheel-bolt"
-                          style={{
-                            left: `${cx}%`,
-                            top: `${cy}%`,
-                            transform: "translate(-50%,-50%)",
-                          }}
-                        />
-                      );
-                    })}
-
-                    <SpinWheelSVG
-                      participants={participants}
-                      rotation={rotation}
-                      isSpinning={isSpinning}
-                    />
-
-                    <button
-                      className="wheel-center-btn flex flex-col items-center justify-center font-[Orbitron] font-black text-white"
-                      onClick={executeSpin}
-                      disabled={isSpinning || participants.length < 2}
-                      title="Quay!"
-                      aria-label="Nhấn để quay"
+              {participants.length > 20 ? (
+                /* SLOT MACHINE MODE */
+                <SlotMachineSpinner
+                  participants={participants}
+                  isSpinning={isSpinning}
+                  targetWinner={pendingWinner}
+                  spinDuration={spinDuration}
+                  onSpinClick={executeSpin}
+                  disabled={isSpinning || participants.length < 2}
+                  isFetchingResult={isFetchingResult}
+                />
+              ) : (
+                /* WHEEL MODE (≤15 người) */
+                <div className="wheel-outer-wrapper">
+                  {/* Đã xóa wheel-glow-ring */}
+                  <div className="wheel-container">
+                    {/* Right Pointer - Bắn từ ngoài (bên phải) vào trong */}
+                    <div 
+                      className="absolute top-1/2 z-[15]" 
+                      style={{ 
+                        right: '-25px', 
+                        transform: 'translateY(-50%) scaleX(-1)', 
+                        pointerEvents: 'none',
+                        userSelect: 'none',
+                        width: '65px',
+                        height: '34px'
+                      }}
                     >
-                      {isFetchingResult ? (
-                        <span className="text-[16px] animate-pulse">Wait</span>
-                      ) : isSpinning ? (
-                        <span className="text-[20px] animate-pulse text-indigo-200">...</span>
-                      ) : (
-                        <span className="text-[24px] tracking-widest text-white drop-shadow-md leading-none ml-1">QUAY</span>
-                      )}
-                    </button>
+                      <svg width="65" height="34" viewBox="0 0 100 50" style={{ pointerEvents: 'none' }}>
+                        <defs>
+                          <linearGradient id="pointerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor="#fff8dc" />
+                            <stop offset="25%" stopColor="#ffd700" />
+                            <stop offset="55%" stopColor="#b8860b" />
+                            <stop offset="80%" stopColor="#daa520" />
+                            <stop offset="100%" stopColor="#8b6914" />
+                          </linearGradient>
+                          <filter id="pointerShadow" x="-10%" y="-20%" width="120%" height="140%">
+                            <feDropShadow dx="1" dy="1" stdDeviation="2" floodColor="#00000066" />
+                          </filter>
+                        </defs>
+                        <path
+                          d="M0,0 L100,25 L0,50 Q12,25 0,0 Z"
+                          fill="url(#pointerGrad)"
+                          stroke="#a0720a"
+                          strokeWidth="1.5"
+                          filter="url(#pointerShadow)"
+                        />
+                        {/* Highlight trên */}
+                        <path
+                          d="M0,0 L100,25 L60,15 Q8,8 0,0 Z"
+                          fill="rgba(255,255,255,0.28)"
+                          stroke="none"
+                        />
+                      </svg>
+                    </div>
+
+                    {/* Đã xóa hiệu ứng hover lệch trục 3D ở phần CSS */}
+                    <div className={`wheel-3d ${isSpinning ? "spinning" : ""}`}>
+                      <div className="wheel-rim" />
+                      {[0, 45, 90, 135, 180, 225, 270, 315].map((angle) => {
+                        const rad = (angle * Math.PI) / 180;
+                        const cx = 50 + 47.5 * Math.cos(rad);
+                        const cy = 50 + 47.5 * Math.sin(rad);
+                        return (
+                          <div
+                            key={angle}
+                            className="wheel-bolt"
+                            style={{
+                              left: `${cx}%`,
+                              top: `${cy}%`,
+                              transform: "translate(-50%,-50%)",
+                            }}
+                          />
+                        );
+                      })}
+
+                      <SpinWheelSVG
+                        participants={participants}
+                        rotation={rotation}
+                        isSpinning={isSpinning}
+                      />
+
+                      <button
+                        className="wheel-center-btn flex flex-col items-center justify-center font-[Orbitron] font-black text-white"
+                        onClick={executeSpin}
+                        disabled={isSpinning || participants.length < 2}
+                        title="Quay!"
+                        aria-label="Nhấn để quay"
+                      >
+                        {isFetchingResult ? (
+                          <span className="text-[16px] animate-pulse">Wait</span>
+                        ) : isSpinning ? (
+                          <span className="text-[20px] animate-pulse text-indigo-200">...</span>
+                        ) : (
+                          <span className="text-[24px] tracking-widest text-white drop-shadow-md leading-none ml-1">QUAY</span>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </section>
+
           </div>
         </div>
       </div>
 
-      <ConfettiEffect active={showConfetti} />
 
-      {/* MODAL: QUẢN LÝ NGƯỜI CHƠI (Tạo Mới + Cập Nhật + Xóa) - CAO CẤP */}
+
+      {/* MODAL: QUẢN LÝ NGƯỜI CHƠI - PREMIUM REDESIGN */}
       {isManageModalOpen && (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 sm:p-6 bg-slate-900/60 dark:bg-[#03010f]/80 backdrop-blur-xl">
-          <div className="bg-slate-50 dark:bg-[#0b0616] border border-slate-200 dark:border-indigo-500/20 rounded-[32px] w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden relative animate-[card-pop_0.3s_ease-out]">
-            
+        <div
+          className="fixed inset-0 z-[150] flex items-center justify-center p-3 sm:p-6"
+          style={{ background: 'rgba(4,4,16,0.85)', backdropFilter: 'blur(20px)' }}
+          onClick={() => setIsManageModalOpen(false)}
+        >
+          <div
+            className="relative w-full max-w-xl flex flex-col rounded-3xl overflow-hidden animate-[card-pop_0.3s_ease-out] shadow-2xl"
+            style={{
+              background: 'linear-gradient(160deg, #0f0c29 0%, #141130 50%, #0f0c29 100%)',
+              border: '1px solid rgba(139,92,246,0.3)',
+              boxShadow: '0 0 0 1px rgba(139,92,246,0.1), 0 40px 80px rgba(0,0,0,0.7), 0 0 60px rgba(99,102,241,0.15)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Top gradient bar */}
+            <div className="h-1 w-full" style={{ background: 'linear-gradient(90deg, #6366f1, #a855f7, #ec4899, #a855f7, #6366f1)', backgroundSize: '200%' }} />
+
             {/* Modal Header */}
-            <div className="bg-white dark:bg-[#120a26] border-b border-slate-200 dark:border-indigo-500/20 p-6 md:px-8 flex items-center justify-between shrink-0 relative z-10">
+            <div className="px-6 md:px-8 pt-6 pb-5 flex items-center justify-between shrink-0" style={{ borderBottom: '1px solid rgba(139,92,246,0.15)' }}>
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-2xl shadow-sm border border-indigo-200 dark:border-indigo-700/50">
-                  📋
+                <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl" style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.3), rgba(168,85,247,0.3))', border: '1px solid rgba(139,92,246,0.4)' }}>
+                  👥
                 </div>
                 <div>
-                  <h2 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white tracking-wide">
-                    Danh Sách Người Chơi
+                  <h2 className="text-xl md:text-2xl font-black text-white tracking-wide font-[Orbitron]">
+                    Người Chơi
                   </h2>
-                  <p className="text-xs md:text-sm text-slate-500 dark:text-indigo-300/80 font-medium mt-0.5">Tổng cộng {participants.length} thành viên tham gia</p>
+                  <p className="text-xs text-indigo-300/60 font-medium mt-0.5">{participants.length} thành viên đã đăng ký</p>
                 </div>
               </div>
               <button
                 onClick={() => setIsManageModalOpen(false)}
-                className="w-10 h-10 bg-slate-100 hover:bg-slate-200 dark:bg-[#1a0f35] dark:hover:bg-[#25154d] text-slate-500 hover:text-slate-800 dark:text-indigo-300 dark:hover:text-white rounded-full transition-colors flex items-center justify-center font-bold text-lg"
-                title="Đóng cửa sổ"
+                className="w-9 h-9 flex items-center justify-center rounded-full text-indigo-300 hover:text-white transition-colors text-lg font-bold"
+                style={{ background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.25)' }}
+                title="Đóng"
               >
                 ✕
               </button>
             </div>
 
-            {/* Modal Body: Thêm Mới */}
-            <div className="p-6 md:px-8 pb-4 shrink-0 bg-white dark:bg-[#0b0616]">
-              <div className="flex flex-col sm:flex-row gap-3 bg-slate-50 dark:bg-[#120a26] border border-slate-200 dark:border-indigo-500/20 p-3 rounded-2xl shadow-sm">
+            {/* Add participant input */}
+            <div className="px-6 md:px-8 py-5 shrink-0" style={{ borderBottom: '1px solid rgba(139,92,246,0.1)' }}>
+              <div className="flex gap-3 rounded-2xl p-2 pl-4" style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(139,92,246,0.2)' }}>
                 <input
                   ref={inputRef}
                   type="text"
                   placeholder="Nhập tên người tham dự..."
                   value={inputName}
                   onChange={(e) => setInputName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleAddParticipant();
-                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleAddParticipant(); }}
                   maxLength={30}
-                  className="flex-1 bg-transparent border-none px-4 py-3 text-slate-800 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 outline-none font-medium text-[15px]"
+                  className="flex-1 bg-transparent border-none text-white placeholder-indigo-400/40 outline-none font-medium text-[15px] py-2"
                 />
                 <button
                   onClick={handleAddParticipant}
                   disabled={!inputName.trim()}
-                  className="px-6 md:px-8 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 disabled:from-slate-200 disabled:to-slate-200 dark:disabled:from-slate-800 dark:disabled:to-slate-800 text-white rounded-xl font-bold transition-all disabled:text-slate-400 dark:disabled:text-slate-600 disabled:cursor-not-allowed shadow-md shadow-indigo-500/20 block w-full sm:w-auto text-[15px]"
+                  className="px-5 py-2.5 rounded-xl font-black text-[14px] tracking-wide transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                  style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', color: 'white', boxShadow: '0 4px 15px rgba(99,102,241,0.4)' }}
                 >
-                  🚀 Thêm
+                  + Thêm
                 </button>
               </div>
             </div>
 
-            {/* Modal Body: Danh sách & Chỉnh Sửa */}
-            <div className="flex-1 overflow-y-auto px-6 md:px-8 pb-6 space-y-4 bg-white dark:bg-[#0b0616]">
+            {/* Participant list */}
+            <div className="flex-1 overflow-y-auto px-6 md:px-8 py-4 space-y-2" style={{ maxHeight: '45vh' }}>
               {participants.length === 0 ? (
-                <div className="h-full min-h-[200px] flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 italic text-sm text-center">
-                  <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-[#120a26] flex items-center justify-center mb-4 text-3xl opacity-60">📭</div>
-                  <p className="font-medium text-base text-slate-500 dark:text-slate-400 not-italic">Danh sách đang trống!</p>
-                  <p className="mt-1">Hãy thêm người vào để bắt đầu quay thưởng</p>
+                <div className="py-12 flex flex-col items-center justify-center gap-3 text-center">
+                  <span className="text-5xl opacity-30">🫙</span>
+                  <p className="text-indigo-300/40 font-semibold">Danh sách đang trống</p>
+                  <p className="text-indigo-400/30 text-sm">Thêm người để bắt đầu quay thưởng</p>
                 </div>
               ) : (
                 participants.map((p, i) => (
-                  <div key={p.id} className="group flex items-center gap-4 md:gap-5 bg-white dark:bg-[#120a26] border border-slate-200 dark:border-indigo-500/20 hover:border-indigo-300 dark:hover:border-indigo-500/50 p-4 px-5 md:px-6 rounded-2xl transition-all shadow-sm hover:shadow-md">
-                    <span 
-                      className="w-4 h-4 rounded-full shrink-0 shadow-[0_0_10px_currentcolor]" 
-                      style={{ background: SEGMENT_COLORS[i % SEGMENT_COLORS.length], color: SEGMENT_COLORS[i % SEGMENT_COLORS.length] }} 
-                    />
-                    
-                    {/* Input Edit Inline */}
+                  <div
+                    key={p.id}
+                    className="group flex items-center gap-3 rounded-2xl px-4 py-3 transition-all"
+                    style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(139,92,246,0.12)' }}
+                    onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(139,92,246,0.4)')}
+                    onMouseLeave={e => (e.currentTarget.style.borderColor = 'rgba(139,92,246,0.12)')}
+                  >
+                    {/* Avatar số */}
+                    <div
+                      className="w-9 h-9 shrink-0 rounded-xl flex items-center justify-center text-[13px] font-black text-white"
+                      style={{ background: SEGMENT_COLORS[i % SEGMENT_COLORS.length], boxShadow: `0 0 12px ${SEGMENT_COLORS[i % SEGMENT_COLORS.length]}60` }}
+                    >
+                      {i + 1}
+                    </div>
                     <input
                       value={p.name}
                       onChange={(e) => handleUpdateName(p.id, e.target.value)}
-                      className="flex-1 bg-transparent border-b-2 border-transparent hover:border-slate-300 dark:hover:border-slate-600 focus:border-indigo-500 text-[16px] md:text-[18px] font-bold text-slate-800 dark:text-white px-2 py-2 outline-none transition-all rounded-none"
+                      className="flex-1 bg-transparent border-none outline-none text-[15px] font-semibold text-white/90 focus:text-white transition-colors"
                       maxLength={30}
                       title="Nhấn để sửa tên"
                     />
-
                     <button
                       onClick={() => handleRemove(p.id)}
-                      className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl bg-red-50 text-red-500 dark:bg-red-500/10 dark:text-red-400 hover:bg-red-500 hover:text-white dark:hover:bg-red-600 dark:hover:text-white transition-colors opacity-80 group-hover:opacity-100 font-bold"
-                      title="Xóa người này"
+                      className="opacity-0 group-hover:opacity-100 w-8 h-8 shrink-0 flex items-center justify-center rounded-lg transition-all text-red-400 hover:text-white hover:bg-red-500"
+                      title="Xóa"
                     >
-                      X
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
                     </button>
                   </div>
                 ))
               )}
             </div>
 
-            {/* Modal Footer */}
-            <div className="p-6 md:px-8 bg-slate-50 dark:bg-[#120a26] border-t border-slate-200 dark:border-indigo-500/20 shrink-0 flex flex-col sm:flex-row items-center justify-between gap-4 z-10">
-              <div className="flex items-center gap-3 w-full sm:w-auto bg-white dark:bg-[#0b0616] p-2 rounded-xl border border-slate-200 dark:border-indigo-500/30">
-                <span className="text-xs text-indigo-600 dark:text-indigo-400 uppercase font-black tracking-widest pl-2">🎯 Preset:</span>
-                <input 
-                  type="text" 
-                  placeholder="Ép kết quả bốc trúng..."
-                  value={presetResult}
-                  onChange={(e) => setPresetResult(e.target.value)}
-                  className="bg-transparent border-none text-[15px] text-slate-800 dark:text-indigo-300 outline-none w-full sm:w-[180px] font-medium"
-                />
-              </div>
+            {/* Footer */}
+            <div className="px-6 md:px-8 py-5 shrink-0 flex flex-col sm:flex-row items-stretch sm:items-center gap-3" style={{ borderTop: '1px solid rgba(139,92,246,0.15)', background: 'rgba(10,8,30,0.6)' }}>
+              {/* Preset input — ADMIN only */}
+              {userRole === "ADMIN" && (
+                <div className="flex items-center gap-2 flex-1 rounded-xl px-4 py-2.5" style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(139,92,246,0.2)' }}>
+                  <span className="text-indigo-400 text-sm shrink-0">🎯</span>
+                  <input
+                    type="text"
+                    placeholder="Ép kết quả (bỏ trống = ngẫu nhiên)..."
+                    value={presetResult}
+                    onChange={(e) => setPresetResult(e.target.value)}
+                    className="bg-transparent border-none text-[14px] text-indigo-200 placeholder-indigo-400/30 outline-none w-full font-medium"
+                  />
+                </div>
+              )}
               <button
                 onClick={async () => {
                   if (wheelId) {
                     await wheelService.updateWheelItems(wheelId, participants.map(p => p.name));
-                    if (presetResult.trim()) {
-                      await wheelService.setWheelPreset(wheelId, presetResult.trim());
-                    } else {
-                      try { await wheelService.clearWheelPreset(wheelId) } catch(e){}
+                    if (userRole === "ADMIN") {
+                      if (presetResult.trim()) {
+                        await wheelService.setWheelPreset(wheelId, presetResult.trim());
+                      } else {
+                        try { await wheelService.clearWheelPreset(wheelId) } catch(e){}
+                      }
                     }
                   }
                   setIsManageModalOpen(false);
                 }}
-                className="w-full sm:w-auto px-10 py-3.5 bg-slate-900 hover:bg-black dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white font-bold tracking-wide rounded-xl transition-all shadow-lg shadow-slate-900/20 dark:shadow-indigo-500/30 text-[15px]"
+                className="shrink-0 px-8 py-3 rounded-xl font-black text-[14px] tracking-widest text-white transition-all hover:opacity-90 active:scale-95"
+                style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 4px 20px rgba(99,102,241,0.4)' }}
               >
                 LƯU & ĐÓNG
               </button>
@@ -867,45 +1369,161 @@ export default function LuckySpinClient() {
         </div>
       )}
 
-      {/* POPUP KẾT QUẢ ĐẸP HƠN */}
+      {/* POPUP KẾT QUẢ */}
       {showResult && winner && (
-        <div className="result-overlay fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/50 dark:bg-black/80 backdrop-blur-xl" onClick={handleCloseResult}>
+        <div
+          className="result-overlay fixed inset-0 z-[200] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(20px)' }}
+          onClick={handleCloseResult}
+        >
+          {/* Confetti góc dưới trái */}
+          <div className="fixed bottom-0 left-0 pointer-events-none" style={{ zIndex: 201 }}>
+            {[...Array(18)].map((_, i) => (
+              <div key={i} style={{
+                position: 'absolute',
+                bottom: 0,
+                left: `${Math.random() * 220}px`,
+                width: `${6 + Math.random() * 8}px`,
+                height: `${6 + Math.random() * 8}px`,
+                borderRadius: Math.random() > 0.5 ? '50%' : '2px',
+                background: ['#f59e0b','#10b981','#6366f1','#ec4899','#f97316','#a855f7','#3b82f6','#22d3ee'][i % 8],
+                animation: `confetti-rise ${1.2 + Math.random() * 1.5}s ease-out ${Math.random() * 0.4}s both`,
+              }} />
+            ))}
+          </div>
+          {/* Confetti góc dưới phải */}
+          <div className="fixed bottom-0 right-0 pointer-events-none" style={{ zIndex: 201 }}>
+            {[...Array(18)].map((_, i) => (
+              <div key={i} style={{
+                position: 'absolute',
+                bottom: 0,
+                right: `${Math.random() * 220}px`,
+                width: `${6 + Math.random() * 8}px`,
+                height: `${6 + Math.random() * 8}px`,
+                borderRadius: Math.random() > 0.5 ? '50%' : '2px',
+                background: ['#f59e0b','#10b981','#6366f1','#ec4899','#f97316','#a855f7','#3b82f6','#22d3ee'][(i + 3) % 8],
+                animation: `confetti-rise ${1.2 + Math.random() * 1.5}s ease-out ${Math.random() * 0.4}s both`,
+              }} />
+            ))}
+          </div>
+
+          <style>{`
+            @keyframes confetti-rise {
+              0%   { transform: translateY(0) rotate(0deg) scale(1); opacity: 1; }
+              60%  { opacity: 1; }
+              100% { transform: translateY(-85vh) rotate(${Math.random() > 0.5 ? '' : '-'}720deg) scale(0.3); opacity: 0; }
+            }
+            @keyframes winner-pop {
+              0%   { transform: scale(0.6); opacity: 0; }
+              70%  { transform: scale(1.04); }
+              100% { transform: scale(1); opacity: 1; }
+            }
+            @keyframes name-glow {
+              0%, 100% { text-shadow: 0 0 20px rgba(167,139,250,0.8), 0 0 40px rgba(99,102,241,0.4); }
+              50%       { text-shadow: 0 0 40px rgba(167,139,250,1), 0 0 80px rgba(99,102,241,0.8), 0 0 120px rgba(236,72,153,0.4); }
+            }
+          `}</style>
+
           <div
-            className="result-card bg-white dark:bg-[#0f111a] border border-slate-200 dark:border-slate-800 rounded-3xl p-8 md:p-12 text-center max-w-lg w-full relative overflow-hidden shadow-2xl dark:shadow-none"
+            className="result-card w-full relative overflow-hidden"
+            style={{
+              maxWidth: '680px',
+              borderRadius: '28px',
+              background: 'linear-gradient(160deg, #0d0b1e 0%, #0f0c29 50%, #120e30 100%)',
+              border: '1px solid rgba(139,92,246,0.4)',
+              boxShadow: '0 0 0 1px rgba(139,92,246,0.15), 0 40px 100px rgba(0,0,0,0.9), 0 0 60px rgba(99,102,241,0.15)',
+              animation: 'winner-pop 0.5s cubic-bezier(0.34,1.56,0.64,1) both',
+              padding: '48px 48px 40px',
+            }}
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
-            aria-labelledby="winner-title"
           >
-            <div className="absolute -inset-10 bg-gradient-conic from-transparent via-blue-500/10 dark:via-indigo-500/10 to-transparent animate-[spin_8s_linear_infinite]" />
-            <div className="relative z-10 flex flex-col items-center gap-2">
-              <div className="result-emoji text-6xl md:text-7xl mb-4 drop-shadow-md dark:drop-shadow-2xl animate-bounce">🎇</div>
-              <p id="winner-title" className="text-xs md:text-sm font-[Orbitron] font-bold text-indigo-700 dark:text-indigo-300 tracking-[0.25em] uppercase opacity-100 mb-2">
-                Chúc Mừng Người Chiến Thắng!
+            {/* Gradient top bar */}
+            <div className="absolute top-0 left-0 right-0 h-1"
+              style={{ background: 'linear-gradient(90deg, #6366f1, #a855f7, #ec4899, #a855f7, #6366f1)' }} />
+
+            {/* Glow bg */}
+            <div className="absolute inset-0 pointer-events-none"
+              style={{ background: 'radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.18) 0%, transparent 70%)' }} />
+
+            <div className="relative z-10 flex flex-col items-center text-center">
+              {/* Trophy emoji */}
+              <div style={{ fontSize: '72px', lineHeight: 1, marginBottom: '16px', animation: 'bounce 1s infinite' }}>🏆</div>
+
+              {/* Label */}
+              <p className="text-xs font-black tracking-[0.4em] uppercase mb-3"
+                style={{ color: '#a78bfa', letterSpacing: '0.35em' }}>
+                ✦ CHÚC MỪNG NGƯỜI CHIẾN THẮNG ✦
               </p>
-              <h2 className="text-4xl md:text-5xl lg:text-6xl font-[Orbitron] font-black text-indigo-800 dark:bg-gradient-to-br dark:from-indigo-300 dark:via-purple-300 dark:to-white dark:bg-clip-text dark:text-transparent pb-3 mb-3 drop-shadow-lg dark:drop-shadow-sm">
+
+              {/* Tên người thắng */}
+              <h2
+                className="font-black uppercase mb-6"
+                style={{
+                  fontSize: 'clamp(2.5rem, 7vw, 4.5rem)',
+                  lineHeight: 1.1,
+                  fontFamily: "'Orbitron', monospace",
+                  background: 'linear-gradient(135deg, #c4b5fd 0%, #f0abfc 40%, #fff 60%, #a5f3fc 100%)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
+                  animation: 'name-glow 2s ease-in-out infinite',
+                  wordBreak: 'break-word',
+                }}
+              >
                 {winner.name}
               </h2>
-              <p className="text-slate-600 dark:text-slate-300 text-sm md:text-base font-semibold tracking-wide mb-8 bg-slate-100 dark:bg-slate-800/80 rounded-full px-5 py-1.5 shadow-sm border border-slate-200 dark:border-slate-700">
-                Phiên: {sessionId} · {new Date().toLocaleTimeString("vi-VN")}
-              </p>
-              <div className="flex flex-col sm:flex-row gap-4 justify-center items-center w-full">
+
+              {/* Buttons */}
+              <div className="flex flex-col sm:flex-row gap-4 w-full justify-center mt-4">
                 <button
                   onClick={() => { setShowResult(false); executeSpin(); }}
-                  className="w-full sm:w-auto px-8 py-3 rounded-full font-[Orbitron] font-bold text-sm tracking-widest text-white bg-indigo-500 hover:bg-indigo-600 shadow-md shadow-indigo-500/30 hover:shadow-indigo-500/50 hover:scale-105 transition-all"
-                >
+                  className="flex-1 sm:flex-none px-12 py-5 rounded-2xl font-black text-base tracking-widest text-white transition-all hover:opacity-90 hover:scale-105 active:scale-95"
+                  style={{
+                    background: 'linear-gradient(135deg, #6366f1, #a855f7)',
+                    boxShadow: '0 4px 24px rgba(99,102,241,0.5)',
+                    fontFamily: "'Orbitron', monospace",
+                  }}>
                   🔄 QUAY TIẾP
                 </button>
                 <button
                   onClick={handleCloseResult}
-                  className="w-full sm:w-auto px-8 py-3 rounded-full font-[Orbitron] font-bold text-sm tracking-widest text-slate-600 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 transition-all border-none"
-                >
-                  ĐÓNG (X)
+                  className="flex-1 sm:flex-none px-12 py-5 rounded-2xl font-black text-base tracking-widest transition-all hover:opacity-80"
+                  style={{
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    color: 'rgba(255,255,255,0.6)',
+                    fontFamily: "'Orbitron', monospace",
+                  }}>
+                  ĐÓNG
                 </button>
               </div>
             </div>
+
+            {/* Session ID — góc dưới trái */}
+            <div className="absolute bottom-5 left-6 flex items-center gap-2 opacity-70">
+              <div className="w-2 h-2 rounded-full bg-emerald-400" />
+              <span className="text-xs font-mono font-bold text-slate-300 tracking-wider">
+                Phiên: {sessionId}
+              </span>
+            </div>
+            {/* Thời gian — góc dưới phải */}
+            <div className="absolute bottom-5 right-6 opacity-70">
+              <span className="text-xs font-mono text-slate-300">
+                {new Date().toLocaleTimeString("vi-VN")}
+              </span>
+            </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL: ADMIN LOGIN INLINE */}
+      {isAdminLoginOpen && (
+        <AdminLoginModal
+          onSuccess={(role) => { setUserRole(role); setIsAdminLoginOpen(false); }}
+          onClose={() => setIsAdminLoginOpen(false)}
+        />
       )}
     </>
   );

@@ -7,6 +7,45 @@ const apiClient = axios.create({
   },
 });
 
+/* ── Token helpers ──────────────────────────────────── */
+export const AUTH_TOKEN_KEY = "luckypick_token";
+export const AUTH_USER_KEY  = "luckypick_user";
+
+export interface AuthUser {
+  token: string;
+  username: string;
+  role: "ADMIN" | "USER";
+}
+
+export function saveAuth(user: AuthUser) {
+  localStorage.setItem(AUTH_TOKEN_KEY, user.token);
+  localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
+}
+
+export function getAuth(): AuthUser | null {
+  try {
+    const raw = localStorage.getItem(AUTH_USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearAuth() {
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  localStorage.removeItem(AUTH_USER_KEY);
+}
+
+export function isAdmin(): boolean {
+  return getAuth()?.role === "ADMIN";
+}
+
+function getAdminHeaders() {
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+/* ── Interfaces ─────────────────────────────────────── */
 export interface Wheel {
   id: number | string;
   name: string;
@@ -25,57 +64,88 @@ export interface SpinHistoryResponse {
   spinTime: string;
 }
 
+/* ── Auth service (Public endpoints) ───────────────── */
+export const authService = {
+  login: async (username: string, password: string): Promise<AuthUser> => {
+    const { data } = await apiClient.post<AuthUser>("/auth/login", { username, password });
+    saveAuth(data);
+    return data;
+  },
+
+  register: async (payload: {
+    username: string;
+    password: string;
+  }): Promise<AuthUser> => {
+    const { data } = await apiClient.post<AuthUser>("/auth/register", payload);
+    saveAuth(data);
+    return data;
+  },
+
+  logout: () => {
+    clearAuth();
+    if (typeof window !== "undefined") window.location.href = "/login";
+  },
+};
+
+/* ── Wheel service ──────────────────────────────────── */
 export const wheelService = {
-  // CREATE Wheel
+  // 🌐 Public
   createWheel: async (name: string, items: string[]): Promise<Wheel> => {
     const { data } = await apiClient.post<Wheel>("/wheels", { name, items });
     return data;
   },
 
-  // GET All Wheels
+  // 🌐 Public
   getWheels: async (): Promise<Wheel[]> => {
     const { data } = await apiClient.get<Wheel[]>("/wheels");
     return data;
   },
 
-  // GET Wheel Detail
+  // 🌐 Public
   getWheelDetail: async (wheelId: string | number): Promise<Wheel> => {
     const { data } = await apiClient.get<Wheel>(`/wheels/${wheelId}`);
     return data;
   },
 
-  // UPDATE Wheel Items
+  // 🌐 Public
   updateWheelItems: async (wheelId: string | number, items: string[]): Promise<Wheel> => {
     const { data } = await apiClient.put<Wheel>(`/wheels/${wheelId}/items`, { items });
     return data;
   },
 
-  // DELETE Wheel
+  // 🌐 Public
   deleteWheel: async (wheelId: string | number): Promise<void> => {
     await apiClient.delete(`/wheels/${wheelId}`);
   },
 
-  // SET Preset
-  setWheelPreset: async (wheelId: string | number, result: string): Promise<string> => {
-    const { data } = await apiClient.post(`/wheels/${wheelId}/preset`, { result });
-    return data;
-  },
-
-  // CLEAR Preset
-  clearWheelPreset: async (wheelId: string | number): Promise<string> => {
-    const { data } = await apiClient.delete(`/wheels/${wheelId}/preset`);
-    return data;
-  },
-
-  // SPIN Wheel
+  // 🌐 Public
   spinWheel: async (wheelId: string | number): Promise<SpinResponse> => {
     const { data } = await apiClient.post<SpinResponse>(`/wheels/${wheelId}/spin`);
     return data;
   },
 
-  // GET Wheel History
+  // 🌐 Public
   getWheelHistory: async (wheelId: string | number): Promise<SpinHistoryResponse[]> => {
     const { data } = await apiClient.get<SpinHistoryResponse[]>(`/wheels/${wheelId}/history`);
+    return data;
+  },
+
+  // 🔒 ADMIN only — gắn Bearer token
+  setWheelPreset: async (wheelId: string | number, result: string): Promise<string> => {
+    const { data } = await apiClient.post(
+      `/wheels/${wheelId}/preset`,
+      { result },
+      { headers: getAdminHeaders() }
+    );
+    return data;
+  },
+
+  // 🔒 ADMIN only — gắn Bearer token
+  clearWheelPreset: async (wheelId: string | number): Promise<string> => {
+    const { data } = await apiClient.delete(
+      `/wheels/${wheelId}/preset`,
+      { headers: getAdminHeaders() }
+    );
     return data;
   },
 };
