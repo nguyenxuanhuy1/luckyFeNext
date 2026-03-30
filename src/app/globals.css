@@ -218,6 +218,14 @@ html, body {
   box-shadow: 0 2px 12px rgba(99,102,241,0.5);
 }
 
+@media (max-width: 480px) {
+  .duration-pills { gap: 0.15rem; padding: 2px; }
+  .duration-pill {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.68rem;
+  }
+}
+
 /* Session badge */
 .session-badge {
   display: flex;

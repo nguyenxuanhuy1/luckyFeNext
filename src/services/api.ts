@@ -46,11 +46,23 @@ function getAdminHeaders() {
 }
 
 /* ── Interfaces ─────────────────────────────────────── */
-export interface Wheel {
+export interface WheelSummary {
   id: number | string;
   name: string;
-  items: string[];
   preset?: string;
+  // items KHÔNG có ở list, chỉ có ở detail
+}
+
+export interface Wheel extends WheelSummary {
+  items: string[];
+}
+
+export interface WheelPage {
+  content: WheelSummary[];
+  totalElements: number;
+  totalPages: number;
+  number: number; // page hiện tại (0-based)
+  size: number;
 }
 
 export interface SpinResponse {
@@ -95,10 +107,14 @@ export const wheelService = {
     return data;
   },
 
-  // 🌐 Public
-  getWheels: async (): Promise<Wheel[]> => {
-    const { data } = await apiClient.get<Wheel[]>("/wheels");
-    return data;
+  // 🌐 Public — trả về 10 bản ghi mới nhất (phân trang)
+  getWheels: async (page = 0, size = 10): Promise<WheelSummary[]> => {
+    // BE có thể trả về WheelPage hoặc mảng thẳng tuỳ impl
+    // Nếu BE trả WheelPage: data.content; nếu trả mảng thẳng: data
+    const { data } = await apiClient.get<WheelSummary[] | WheelPage>("/wheels", {
+      params: { page, size },
+    });
+    return Array.isArray(data) ? data : (data as WheelPage).content;
   },
 
   // 🌐 Public

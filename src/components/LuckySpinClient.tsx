@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { wheelService, SpinHistoryResponse, getAuth, authService } from "@/services/api";
+import { wheelService, SpinHistoryResponse, Wheel, WheelSummary, getAuth, authService } from "@/services/api";
 
 /* ============================
    TYPES
@@ -508,6 +508,361 @@ function AdminLoginModal({
 }
 
 /* ============================
+   ADMIN WHEEL PANEL
+   ============================ */
+function AdminWheelPanel({
+  currentWheelId,
+  onSelectWheel,
+}: {
+  currentWheelId: string | number | null;
+  onSelectWheel: (wheel: WheelSummary) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [wheels, setWheels] = useState<WheelSummary[]>([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [wheelDetails, setWheelDetails] = useState<Record<string | number, Wheel>>({});
+  const [loadingDetail, setLoadingDetail] = useState<string | number | null>(null);
+  const [presetInputs, setPresetInputs] = useState<Record<string | number, string>>({})
+  const [saving, setSaving] = useState<string | number | null>(null);
+  const [msg, setMsg] = useState<{ id: string | number; text: string; ok: boolean } | null>(null);
+  const [expandedId, setExpandedId] = useState<string | number | null>(null);
+  const [copiedName, setCopiedName] = useState<string | null>(null);
+  const [itemSearch, setItemSearch] = useState<Record<string | number, string>>({});
+  const [itemSearchOpen, setItemSearchOpen] = useState<Record<string | number, boolean>>({});
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const data = await wheelService.getWheels(0, 10);
+      setWheels(data);
+    } catch { /* ignore */ }
+    setLoading(false);
+  };
+
+  // Fetch chi tiết 1 wheel (có items), cache lại
+  const fetchDetail = async (id: string | number) => {
+    if (wheelDetails[id]) {
+      setExpandedId(expandedId === id ? null : id);
+      return;
+    }
+    setLoadingDetail(id);
+    setExpandedId(id);
+    try {
+      const detail = await wheelService.getWheelDetail(id);
+      setWheelDetails(prev => ({ ...prev, [id]: detail }));
+    } catch { /* ignore */ }
+    setLoadingDetail(null);
+  };
+
+  // Search by ID: nếu nhập số thuần tú → fetch detail trực tiếp
+  const handleSearch = async (val: string) => {
+    setSearch(val);
+    const trimmed = val.trim();
+    if (/^\d+$/.test(trimmed) && !wheels.find(w => String(w.id) === trimmed)) {
+      try {
+        const detail = await wheelService.getWheelDetail(trimmed);
+        setWheelDetails(prev => ({ ...prev, [detail.id]: detail }));
+        // Chèn vào list nếu chưa có
+        setWheels(prev => prev.find(w => w.id === detail.id) ? prev : [detail, ...prev]);
+      } catch { /* không tìm thấy */ }
+    }
+  };
+
+  useEffect(() => { if (open) load(); }, [open]);
+
+  const filtered = wheels.filter((w) =>
+    w.name.toLowerCase().includes(search.toLowerCase()) ||
+    String(w.id).includes(search)
+  );
+
+  const handleSetPreset = async (wheel: WheelSummary) => {
+    const val = (presetInputs[wheel.id] ?? "").trim();
+    setSaving(wheel.id);
+    try {
+      if (val) {
+        await wheelService.setWheelPreset(wheel.id, val);
+        setMsg({ id: wheel.id, text: `✓ Đã chèn "${val}"`, ok: true });
+      } else {
+        await wheelService.clearWheelPreset(wheel.id);
+        setMsg({ id: wheel.id, text: "✓ Đã xoá preset", ok: true });
+      }
+      await load();
+    } catch {
+      setMsg({ id: wheel.id, text: "✗ Lỗi, thử lại", ok: false });
+    }
+    setSaving(null);
+    setTimeout(() => setMsg(null), 3000);
+  };
+
+
+  return (
+    <>
+      {/* Float button */}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="Quản lý vòng quay (Admin)"
+        style={{
+          position: "fixed",
+          bottom: "1.75rem",
+          right: "1.75rem",
+          zIndex: 900,
+          width: 54,
+          height: 54,
+          borderRadius: "50%",
+          background: open
+            ? "linear-gradient(135deg,#f43f5e,#a855f7)"
+            : "linear-gradient(135deg,#6366f1,#a855f7)",
+          border: "2px solid rgba(255,255,255,0.15)",
+          boxShadow: "0 8px 32px rgba(99,102,241,0.55), 0 2px 8px rgba(0,0,0,0.5)",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: "1.5rem",
+          transition: "all 0.3s cubic-bezier(0.34,1.56,0.64,1)",
+          transform: open ? "rotate(45deg) scale(1.05)" : "rotate(0deg) scale(1)",
+        }}
+      >
+        {open ? "✕" : "⚙"}
+      </button>
+
+      {/* Slide panel */}
+      <div
+        style={{
+          position: "fixed",
+          bottom: "5.5rem",
+          right: open ? "1.75rem" : "-420px",
+          zIndex: 899,
+          width: 380,
+          maxWidth: "calc(100vw - 2rem)",
+          maxHeight: "70vh",
+          borderRadius: 20,
+          background: "linear-gradient(160deg,rgba(10,8,26,0.97) 0%,rgba(18,13,45,0.97) 100%)",
+          border: "1px solid rgba(139,92,246,0.35)",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.7), 0 0 40px rgba(99,102,241,0.15)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          transition: "right 0.35s cubic-bezier(0.34,1.2,0.64,1), opacity 0.25s",
+          opacity: open ? 1 : 0,
+          pointerEvents: open ? "all" : "none",
+        }}
+      >
+        {/* Top bar */}
+        <div style={{ height: 2, background: "linear-gradient(90deg,#6366f1,#a855f7,#ec4899)", flexShrink: 0 }} />
+
+        {/* Header */}
+        <div style={{ padding: "1rem 1.25rem 0.75rem", borderBottom: "1px solid rgba(255,255,255,0.06)", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", marginBottom: "0.75rem" }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#a855f7)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.1rem", flexShrink: 0, boxShadow: "0 0 16px rgba(99,102,241,0.5)" }}>⚙</div>
+            <div>
+              <div style={{ fontFamily: "'Orbitron',monospace", fontWeight: 800, fontSize: "0.78rem", letterSpacing: "0.12em", color: "#c4b5fd" }}>QUẢN LÝ VÒNG QUAY</div>
+              <div style={{ fontSize: "0.68rem", color: "rgba(192,132,252,0.5)", marginTop: 2 }}>{wheels.length} vòng quay · Admin only</div>
+            </div>
+            <button onClick={load} title="Làm mới" style={{ marginLeft: "auto", width: 28, height: 28, borderRadius: 8, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(192,132,252,0.6)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.9rem", transition: "all 0.2s" }}>↻</button>
+          </div>
+          {/* Search */}
+          <div style={{ position: "relative" }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(139,92,246,0.5)" strokeWidth="2" strokeLinecap="round" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
+              <circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" />
+            </svg>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => handleSearch(e.target.value)}
+              placeholder="Tìm theo tên hoặc ID..."
+              style={{ width: "100%", paddingLeft: 30, paddingRight: 12, paddingTop: 7, paddingBottom: 7, borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(139,92,246,0.2)", color: "#e2d9f3", fontSize: "0.78rem", outline: "none", fontFamily: "Inter,sans-serif" }}
+            />
+          </div>
+        </div>
+
+        {/* List */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "0.6rem" }}>
+          {loading ? (
+            <div style={{ textAlign: "center", padding: "2rem", color: "rgba(192,132,252,0.4)", fontSize: "0.78rem" }}>Đang tải...</div>
+          ) : filtered.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "2rem", color: "rgba(192,132,252,0.3)", fontSize: "0.78rem" }}>Không có vòng quay nào</div>
+          ) : (
+            filtered.map((wheel) => {
+              const isActive = wheel.id === currentWheelId;
+              const presetVal = presetInputs[wheel.id] ?? (wheel.preset ?? "");
+              const isSaving = saving === wheel.id;
+              const wheelMsg = msg?.id === wheel.id ? msg : null;
+              return (
+                <div
+                  key={wheel.id}
+                  style={{
+                    borderRadius: 13,
+                    marginBottom: "0.45rem",
+                    background: isActive ? "rgba(99,102,241,0.12)" : "rgba(255,255,255,0.03)",
+                    border: isActive ? "1px solid rgba(139,92,246,0.4)" : "1px solid rgba(255,255,255,0.05)",
+                    overflow: "hidden",
+                    transition: "all 0.2s",
+                  }}
+                >
+                  {/* Wheel info row */}
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: "0.6rem", padding: "0.6rem 0.75rem", cursor: "pointer" }}
+                    onClick={() => fetchDetail(wheel.id)}
+                  >
+                    {/* ID badge — click = load wheel vào giao diện */}
+                    <div
+                      onClick={(e) => { e.stopPropagation(); onSelectWheel(wheel); }}
+                      title="Tải vòng quay này vào giao diện"
+                      style={{ width: 30, height: 30, borderRadius: 8, background: "linear-gradient(135deg,#6366f1,#a855f7)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.7rem", fontFamily: "'Orbitron',monospace", fontWeight: 700, color: "#fff", flexShrink: 0, cursor: "pointer", boxShadow: "0 0 10px rgba(99,102,241,0.4)" }}
+                    >
+                      {String(wheel.id).slice(-2)}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: "0.82rem", color: isActive ? "#c4b5fd" : "#e2d9f3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wheel.name}</div>
+                      <div style={{ fontSize: "0.65rem", color: "rgba(192,132,252,0.45)", marginTop: 1 }}>
+                        {wheelDetails[wheel.id] ? `${wheelDetails[wheel.id].items.length} người` : "···"} · ID #{wheel.id} <span style={{ color: "rgba(139,92,246,0.5)" }}>{expandedId === wheel.id ? "▲" : "▼"}</span>
+                      </div>
+                    </div>
+                    {wheel.preset && (
+                      <span style={{ fontSize: "0.62rem", fontWeight: 700, padding: "2px 7px", borderRadius: 99, background: "rgba(251,146,60,0.15)", border: "1px solid rgba(251,146,60,0.35)", color: "#fb923c", whiteSpace: "nowrap" }}>🎯 {wheel.preset}</span>
+                    )}
+                    {isActive && (
+                      <span style={{ fontSize: "0.6rem", fontWeight: 700, padding: "2px 7px", borderRadius: 99, background: "rgba(16,185,129,0.12)", border: "1px solid rgba(16,185,129,0.3)", color: "#34d399", whiteSpace: "nowrap" }}>● Live</span>
+                    )}
+                  </div>
+
+                  {/* Expandable items list */}
+                  {expandedId === wheel.id && (
+                    <div style={{ padding: "0 0.75rem 0.5rem", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                      {loadingDetail === wheel.id ? (
+                        <div style={{ textAlign: "center", padding: "0.6rem", fontSize: "0.72rem", color: "rgba(192,132,252,0.4)" }}>Đang tải...</div>
+                      ) : wheelDetails[wheel.id] ? (() => {
+                        const allItems = wheelDetails[wheel.id].items;
+                        const q = (itemSearch[wheel.id] ?? "").toLowerCase();
+                        const filtered = q ? allItems.filter((n: string) => n.toLowerCase().includes(q)) : allItems;
+                        const searchOpen = !!itemSearchOpen[wheel.id];
+                        return (
+                          <>
+                            {/* Header row: label + search toggle */}
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", padding: "0.4rem 0 0.3rem" }}>
+                              <span style={{ fontSize: "0.6rem", color: "rgba(192,132,252,0.4)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", flex: 1 }}>
+                                {q ? `${filtered.length}/${allItems.length}` : allItems.length} người — click tên → preset
+                              </span>
+                              {/* Toggle search button */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setItemSearchOpen(prev => ({ ...prev, [wheel.id]: !searchOpen }));
+                                  if (searchOpen) setItemSearch(prev => ({ ...prev, [wheel.id]: "" }));
+                                }}
+                                title={searchOpen ? "Đóng tìm kiếm" : "Tìm kiếm trong danh sách"}
+                                style={{
+                                  width: 22, height: 22, borderRadius: 6, border: "none", cursor: "pointer",
+                                  background: searchOpen ? "rgba(99,102,241,0.3)" : "rgba(255,255,255,0.06)",
+                                  color: searchOpen ? "#c4b5fd" : "rgba(192,132,252,0.5)",
+                                  display: "flex", alignItems: "center", justifyContent: "center",
+                                  transition: "all 0.2s", flexShrink: 0,
+                                }}
+                              >
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                                  <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                                </svg>
+                              </button>
+                            </div>
+
+                            {/* Inline search input */}
+                            {searchOpen && (
+                              <div style={{ marginBottom: "0.4rem", position: "relative" }}>
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(139,92,246,0.45)" strokeWidth="2.5" strokeLinecap="round"
+                                  style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
+                                  <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                                </svg>
+                                <input
+                                  autoFocus
+                                  type="text"
+                                  value={itemSearch[wheel.id] ?? ""}
+                                  onChange={(e) => setItemSearch(prev => ({ ...prev, [wheel.id]: e.target.value }))}
+                                  onClick={(e) => e.stopPropagation()}
+                                  placeholder={`Tìm trong ${allItems.length} người...`}
+                                  style={{
+                                    width: "100%", paddingLeft: 26, paddingRight: 8, paddingTop: 5, paddingBottom: 5,
+                                    borderRadius: 8, background: "rgba(99,102,241,0.08)",
+                                    border: "1px solid rgba(139,92,246,0.25)", color: "#e2d9f3",
+                                    fontSize: "0.72rem", outline: "none", fontFamily: "Inter,sans-serif",
+                                  }}
+                                />
+                                {(itemSearch[wheel.id] ?? "") && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setItemSearch(prev => ({ ...prev, [wheel.id]: "" })); }}
+                                    style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "rgba(192,132,252,0.4)", cursor: "pointer", fontSize: "0.75rem", lineHeight: 1 }}
+                                  >✕</button>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Items grid */}
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", maxHeight: 140, overflowY: "auto" }}>
+                              {filtered.length === 0 ? (
+                                <div style={{ fontSize: "0.68rem", color: "rgba(192,132,252,0.3)", padding: "0.3rem 0" }}>Không tìm thấy</div>
+                              ) : filtered.map((name: string, idx: number) => (
+                                <button
+                                  key={idx}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setPresetInputs((prev) => ({ ...prev, [wheel.id]: name }));
+                                    navigator.clipboard?.writeText(name).catch(() => {});
+                                    setCopiedName(name);
+                                    setTimeout(() => setCopiedName(null), 1500);
+                                  }}
+                                  style={{
+                                    padding: "3px 10px", borderRadius: 99, fontSize: "0.7rem", fontWeight: 600, cursor: "pointer",
+                                    background: copiedName === name ? "rgba(16,185,129,0.18)" : "rgba(99,102,241,0.1)",
+                                    border: `1px solid ${copiedName === name ? "rgba(16,185,129,0.45)" : "rgba(139,92,246,0.25)"}`,
+                                    color: copiedName === name ? "#34d399" : "#c4b5fd",
+                                    transition: "all 0.15s", whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  {copiedName === name ? "✓ " : ""}{name}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        );
+                      })() : null}
+                    </div>
+                  )}
+
+                  {/* Preset row */}
+                  <div style={{ display: "flex", gap: "0.4rem", padding: "0 0.75rem 0.4rem", alignItems: "center" }}>
+                    <input
+                      type="text"
+                      value={presetVal}
+                      onChange={(e) => setPresetInputs((prev) => ({ ...prev, [wheel.id]: e.target.value }))}
+                      placeholder="Chèn kết quả..."
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ flex: 1, padding: "5px 10px", borderRadius: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(139,92,246,0.18)", color: "#e2d9f3", fontSize: "0.72rem", outline: "none", fontFamily: "Inter,sans-serif" }}
+                    />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleSetPreset(wheel); }}
+                      disabled={isSaving}
+                      style={{ padding: "5px 12px", borderRadius: 8, background: "linear-gradient(135deg,#6366f1,#a855f7)", border: "none", color: "#fff", fontSize: "0.7rem", fontWeight: 700, cursor: "pointer", flexShrink: 0, opacity: isSaving ? 0.5 : 1, fontFamily: "'Orbitron',monospace", letterSpacing: "0.05em" }}
+                    >
+                      {isSaving ? "..." : "LƯU"}
+                    </button>
+                  </div>
+
+
+                  {wheelMsg && (
+                    <div style={{ padding: "0 0.75rem 0.55rem", fontSize: "0.68rem", fontWeight: 600, color: wheelMsg.ok ? "#34d399" : "#f87171" }}>{wheelMsg.text}</div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ============================
    MAIN COMPONENT
    ============================ */
 export default function LuckySpinClient() {
@@ -524,13 +879,14 @@ export default function LuckySpinClient() {
   const [pendingWinner, setPendingWinner] = useState<Participant | null>(null);
   const [showResult, setShowResult] = useState(false);
 
-  const [sessionId, setSessionId] = useState(() => generateSessionId());
+  const [sessionId, setSessionId] = useState<string>("----");
   const [history, setHistory] = useState<SpinHistoryResponse[]>([]);
-  const [spinDuration, setSpinDuration] = useState<number>(5);
+  const [spinDuration, setSpinDuration] = useState<number>(16);
   const [userRole, setUserRole] = useState<"ADMIN" | "USER" | null>(null);
 
   const [isManageModalOpen, setIsManageModalOpen] = useState(false);
   const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const animFrameRef = useRef<number | null>(null);
@@ -628,7 +984,7 @@ export default function LuckySpinClient() {
             { id: Date.now(), wheelId: wheelId as string, result: apiResult.winner.name, spinTime: now2.toLocaleTimeString("vi-VN") },
             ...prev.slice(0, 19),
           ]);
-          setSessionId(generateSessionId());
+          // sessionId giữ nguyên = wheelId từ API, không reset
         }
       }
       animFrameRef.current = requestAnimationFrame(animate);
@@ -889,7 +1245,35 @@ export default function LuckySpinClient() {
                   <p className="modal-subtitle">{participants.length} thành viên · chỉnh sửa tự do</p>
                 </div>
               </div>
-              <button className="modal-close-btn" onClick={() => setIsManageModalOpen(false)} title="Đóng">✕</button>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                {participants.length > 0 && (
+                  <button
+                    onClick={() => setParticipants([])}
+                    title="Xoá tất cả"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.35rem",
+                      padding: "0.3rem 0.7rem",
+                      borderRadius: "8px",
+                      background: "rgba(244,63,94,0.1)",
+                      border: "1px solid rgba(244,63,94,0.3)",
+                      color: "#f87171",
+                      fontSize: "0.72rem",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      transition: "all 0.2s",
+                      letterSpacing: "0.04em",
+                      whiteSpace: "nowrap",
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = "rgba(244,63,94,0.2)")}
+                    onMouseLeave={e => (e.currentTarget.style.background = "rgba(244,63,94,0.1)")}
+                  >
+                    🗑 Xoá tất cả
+                  </button>
+                )}
+                <button className="modal-close-btn" onClick={() => setIsManageModalOpen(false)} title="Đóng">✕</button>
+              </div>
             </div>
 
             <div className="modal-add-row">
@@ -1014,6 +1398,28 @@ export default function LuckySpinClient() {
         <AdminLoginModal
           onSuccess={(role) => { setUserRole(role); setIsAdminLoginOpen(false); }}
           onClose={() => setIsAdminLoginOpen(false)}
+        />
+      )}
+
+      {/* ── ADMIN WHEEL PANEL (float, bottom-right) ── */}
+      {userRole === "ADMIN" && (
+        <AdminWheelPanel
+          currentWheelId={wheelId}
+          onSelectWheel={async (summary) => {
+            setWheelId(summary.id);
+            setSessionId(String(summary.id));
+            setPresetResult(summary.preset ?? "");
+            setHistory([]);
+            setRotation(0);
+            currentRotationRef.current = 0;
+            // Fetch detail để lấy items
+            try {
+              const detail = await wheelService.getWheelDetail(summary.id);
+              setParticipants(detail.items.map((name) => ({ id: generateUid(), name })));
+            } catch {
+              setParticipants([]);
+            }
+          }}
         />
       )}
     </>
