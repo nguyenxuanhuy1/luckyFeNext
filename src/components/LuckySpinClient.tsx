@@ -1020,7 +1020,7 @@ export default function LuckySpinClient() {
         <header className="top-bar">
           <div className="logo">
             <div className="logo-icon">🎯</div>
-            <span className="logo-text hidden sm:block">LuckyPick</span>
+            <span className="logo-text hidden sm:block">QuayMayMan</span>
           </div>
 
           <div className="header-controls">

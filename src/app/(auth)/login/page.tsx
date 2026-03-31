@@ -87,14 +87,21 @@ export default function LoginPage() {
       </button>
 
       {/* BRAND LOGO */}
-      <div style={{ position: "absolute", top: "28px", left: "32px", zIndex: 20, display: "flex", alignItems: "center", gap: "12px" }}>
-        <div style={{ width: "38px", height: "38px", borderRadius: "12px", background: "linear-gradient(135deg, #6366f1, #a855f7)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 20px rgba(99,102,241,0.5)" }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg>
-        </div>
-        <div>
-          <div style={{ fontSize: "18px", fontWeight: 800, color: "white", letterSpacing: "-0.5px" }}>LuckyPick</div>
-          <div style={{ fontSize: "11px", color: "rgba(255,255,255,0.5)" }}>Vòng quay may mắn</div>
-        </div>
+      <div style={{ position: "absolute", top: "28px", left: "32px", zIndex: 20, display: "flex", alignItems: "center", gap: "10px" }}>
+        <div style={{
+          width: "36px", height: "36px", borderRadius: "10px",
+          background: "linear-gradient(135deg, #6366f1, #a855f7)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: "1.2rem",
+          boxShadow: "0 0 20px rgba(168,85,247,0.5), inset 0 1px 0 rgba(255,255,255,0.2)",
+        }}>🎯</div>
+        <span style={{
+          fontFamily: "'Orbitron', monospace",
+          fontWeight: 800, fontSize: "1.15rem", letterSpacing: "0.05em",
+          background: "linear-gradient(135deg, #c4b5fd, #818cf8)",
+          WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+          backgroundClip: "text",
+        }}>QuayMayMan</span>
       </div>
 
       {/* LOGIN / REGISTER FORM */}
