@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import LuckySpinClient from "@/components/LuckySpinClient";
 
 export const metadata: Metadata = {
-  title: "LuckyPick - Vòng Quay May Mắn Đỉnh Cao 3D",
+  title: "QuayMayMan - Vòng Quay May Mắn",
   description:
     "Trải nghiệm vòng quay may mắn (Lucky Spin) ngẫu nhiên, đẹp mắt với đồ họa 3D siêu mượt. Công cụ bốc thăm ngẫu nhiên kết nối API, tối ưu hoàn hảo cho các sự kiện trực tiếp.",
   keywords: [
@@ -15,11 +15,11 @@ export const metadata: Metadata = {
     "quay số",
   ],
   openGraph: {
-    title: "LuckyPick - Vòng Quay May Mắn Đỉnh Cao 3D",
+    title: "QuayMayMan - Vòng Quay May Mắn",
     description:
       "Trải nghiệm vòng quay may mắn ngẫu nhiên, đẹp mắt với đồ họa 3D siêu mượt. Công cụ bốc thăm ngẫu nhiên số 1.",
-    url: "https://luckypick.example.com",
-    siteName: "LuckyPick",
+    url: "https://quaymayman.online",
+    siteName: "QuayMayMan",
     locale: "vi_VN",
     type: "website",
   },
@@ -36,7 +36,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "LuckyPick - Vòng Quay May Mắn Đỉnh Cao 3D",
+    title: "QuayMayMan - Vòng Quay May Mắn",
     description:
       "Trải nghiệm vòng quay may mắn ngẫu nhiên với đồ họa 3D siêu mượt!",
   },
@@ -52,8 +52,8 @@ export default function Page() {
           __html: JSON.stringify({
             "@context": "https://schema.org",
             "@type": "WebApplication",
-            name: "LuckyPick - Vòng Quay May Mắn 3D",
-            url: "https://luckypick.example.com",
+            name: "QuayMayMan - Vòng Quay May Mắn",
+            url: "https://quaymayman.online",
             description:
               "Ứng dụng quay vòng may mắn bốc thăm trúng thưởng đồ họa 3D đẹp mắt, hỗ trợ tuỳ chỉnh tham số linh hoạt và chuẩn bị tích hợp API backend dễ dàng.",
             applicationCategory: "UtilitiesApplication",

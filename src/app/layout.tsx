@@ -3,10 +3,11 @@ import "./globals.css";
 
 
 export const metadata: Metadata = {
-  title: "LuckyPick – Vòng Quay May Mắn",
+  title: "QuayMayMan – Vòng Quay May Mắn",
   description:
     "Ứng dụng quay số ngẫu nhiên chọn người may mắn với hiệu ứng 3D đẹp mắt và mã phiên riêng biệt.",
-  keywords: ["lucky spin", "quay số may mắn", "chọn ngẫu nhiên", "vòng quay"],
+  keywords: ["lucky", "quay may mắn", "chọn ngẫu nhiên", "vòng quay"],
+
 };
 
 export default function RootLayout({

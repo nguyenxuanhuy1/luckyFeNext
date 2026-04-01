@@ -630,7 +630,6 @@ html, body {
   flex: 1;
   font-size: 0.82rem;
   font-weight: 700;
-  truncate: true;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
